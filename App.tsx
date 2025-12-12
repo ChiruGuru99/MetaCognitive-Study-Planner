@@ -17,6 +17,7 @@ const App: React.FC = () => {
 
   const [loadingMsgIndex, setLoadingMsgIndex] = useState(0);
   const [isRefining, setIsRefining] = useState(false);
+  const [isParsingFile, setIsParsingFile] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Store the active chat session to maintain conversation context
@@ -42,20 +43,75 @@ const App: React.FC = () => {
     setState((prev) => ({ ...prev, userInput: e.target.value }));
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target?.result as string;
-      setState((prev) => ({ ...prev, userInput: text }));
-    };
-    reader.onerror = () => {
-      setState((prev) => ({ ...prev, error: "Failed to read file. Please try pasting the content instead." }));
-    };
-    // Reading as text for CSV/TXT/MD support
-    reader.readAsText(file);
+    setState((prev) => ({ ...prev, error: null }));
+    setIsParsingFile(true);
+
+    try {
+      let extractedText = '';
+
+      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+        // Dynamic import for PDF handling
+        const pdfjsLib = await import('pdfjs-dist');
+        // Set worker source to the same version from esm.sh
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://esm.sh/pdfjs-dist@3.11.174/build/pdf.worker.min.js`;
+
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument(arrayBuffer);
+        const pdf = await loadingTask.promise;
+        
+        const pageTextPromises = [];
+        for (let i = 1; i <= pdf.numPages; i++) {
+          pageTextPromises.push(
+            pdf.getPage(i).then(async (page: any) => {
+              const textContent = await page.getTextContent();
+              return textContent.items.map((item: any) => item.str).join(' ');
+            })
+          );
+        }
+        const pageTexts = await Promise.all(pageTextPromises);
+        extractedText = pageTexts.join('\n\n');
+
+      } else if (
+        file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
+        file.name.endsWith('.docx')
+      ) {
+        // Dynamic import for DOCX handling
+        const mammoth = await import('mammoth');
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        extractedText = result.value;
+        if (result.messages.length > 0) {
+           console.warn("Mammoth messages:", result.messages);
+        }
+
+      } else {
+        // Fallback for text-based files
+        extractedText = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (event) => resolve(event.target?.result as string);
+          reader.onerror = (err) => reject(err);
+          reader.readAsText(file);
+        });
+      }
+
+      setState((prev) => ({ ...prev, userInput: extractedText }));
+    } catch (err: any) {
+      console.error("File parsing error:", err);
+      setState((prev) => ({ 
+        ...prev, 
+        error: "Failed to read file. Please ensure it is a valid text, PDF, or DOCX file." 
+      }));
+    } finally {
+      setIsParsingFile(false);
+      // Reset file input value so the same file can be selected again if needed
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
   };
 
   const handleSubmit = async () => {
@@ -181,19 +237,32 @@ const App: React.FC = () => {
       <div className="space-y-6">
         {state.mode === 'enhance' && (
           <div 
-            className="border-2 border-dashed border-indigo-200 rounded-xl p-6 text-center hover:bg-indigo-50 transition-colors cursor-pointer"
-            onClick={() => fileInputRef.current?.click()}
+            className={`border-2 border-dashed rounded-xl p-6 text-center transition-colors cursor-pointer ${
+              isParsingFile 
+              ? 'border-indigo-300 bg-indigo-50 cursor-wait' 
+              : 'border-indigo-200 hover:bg-indigo-50'
+            }`}
+            onClick={() => !isParsingFile && fileInputRef.current?.click()}
           >
             <input 
               type="file" 
               ref={fileInputRef} 
               className="hidden" 
-              accept=".csv,.txt,.md,.json" 
+              accept=".csv,.txt,.md,.json,.pdf,.docx" 
               onChange={handleFileUpload}
             />
-            <FileText className="w-10 h-10 text-indigo-400 mx-auto mb-2" />
-            <p className="text-sm font-medium text-gray-600">Click to upload text/CSV file</p>
-            <p className="text-xs text-gray-400 mt-1">or paste the content below</p>
+            {isParsingFile ? (
+              <div className="flex flex-col items-center">
+                <Loader2 className="w-10 h-10 text-indigo-400 animate-spin mb-2" />
+                <p className="text-sm font-medium text-indigo-700">Reading file...</p>
+              </div>
+            ) : (
+              <>
+                <FileText className="w-10 h-10 text-indigo-400 mx-auto mb-2" />
+                <p className="text-sm font-medium text-gray-600">Click to upload .pdf, .docx, or text file</p>
+                <p className="text-xs text-gray-400 mt-1">or paste the content below</p>
+              </>
+            )}
           </div>
         )}
 
@@ -221,7 +290,7 @@ const App: React.FC = () => {
 
         <button
           onClick={handleSubmit}
-          disabled={!state.userInput.trim()}
+          disabled={!state.userInput.trim() || isParsingFile}
           className="w-full py-4 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-bold text-lg shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed transition-all transform active:scale-[0.98]"
         >
           {state.mode === 'enhance' ? "Optimize My Plan" : "Generate Plan"}

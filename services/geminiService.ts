@@ -2,9 +2,6 @@ import { GoogleGenAI, Chat } from "@google/genai";
 import { KNOWLEDGE_BASE } from "../constants";
 import { PromptContext } from "../types";
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 /**
  * Constructs the prompt dynamically based on user input and task type.
  * Acts as the "Prompt Generator Agent".
@@ -84,6 +81,9 @@ export const startPlanningSession = async (context: PromptContext): Promise<Chat
   try {
     const prompt = constructPrompt(context);
 
+    // Initialize Gemini Client locally to ensure fresh context for every session
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
     // Create a chat session
     const chat = ai.chats.create({
       model: 'gemini-3-pro-preview',
@@ -108,6 +108,8 @@ export const startPlanningSession = async (context: PromptContext): Promise<Chat
 
 export const continuePlanningSession = async (chat: Chat, userMessage: string): Promise<string> => {
   try {
+    // We implicitly treat this as a refinement request within the existing session.
+    // The 'chat' object holds the history.
     const response = await chat.sendMessage({ message: userMessage });
     let text = response.text || "I couldn't generate a response.";
     text = appendGroundingSources(text, response);

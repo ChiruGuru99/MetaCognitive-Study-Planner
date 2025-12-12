@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import { Download, RefreshCw, CheckCircle, Send, MessageSquarePlus } from 'lucide-react';
 
 interface PlanResultProps {
@@ -71,7 +72,10 @@ const PlanResult: React.FC<PlanResultProps> = ({ result, onReset, onRefine, isRe
           prose-th:bg-slate-800 prose-th:text-indigo-200 prose-th:p-4
           prose-td:p-4 prose-td:bg-slate-800/50 prose-td:text-slate-200
           prose-tr:border-b prose-tr:border-slate-700">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown 
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeRaw]}
+          >
             {result}
           </ReactMarkdown>
         </div>
